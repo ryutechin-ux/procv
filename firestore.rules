@@ -1,0 +1,131 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function role() {
+      return get(userPath()).data.role;
+    }
+
+    function isAdmin() {
+      return signedIn() && role() == 'admin';
+    }
+
+    function isDeveloper() {
+      return signedIn() && role() == 'developer';
+    }
+
+    match /meta/bootstrap {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.adminUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.isBlocked == false
+        && (
+          request.resource.data.role == 'user'
+          || (
+            request.resource.data.role == 'developer'
+            && exists(/databases/$(database)/documents/developers/$(request.auth.token.email))
+          )
+          || (
+            request.resource.data.role == 'admin'
+            && (
+              !exists(/databases/$(database)/documents/meta/bootstrap)
+              || get(/databases/$(database)/documents/meta/bootstrap).data.adminUid == request.auth.uid
+            )
+          )
+        );
+      allow update: if isAdmin()
+        || (
+          request.auth.uid == userId
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.isBlocked == resource.data.isBlocked
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /cvRequests/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin()
+        || isDeveloper()
+        || resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    match /workAssignments/{id} {
+      allow read: if signedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        || resource.data.developerId == request.auth.uid
+        || resource.data.developerId == request.auth.token.email;
+      allow delete: if isAdmin();
+    }
+
+    match /cvSubmissions/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.developerId == request.auth.uid;
+      allow update: if isAdmin() || resource.data.developerId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    match /developers/{id} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.token.email == id
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId'])
+        );
+    }
+
+    match /notifications/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update: if isAdmin()
+        || (
+          resource.data.userId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+        )
+        || (
+          resource.data.userId == request.auth.token.email
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId'])
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /portfolios/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin()
+        || (signedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    match /jobPositions/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
